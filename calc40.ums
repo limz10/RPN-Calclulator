@@ -1,94 +1,101 @@
+// ---------------------- register usage -----------------
+// r0 is always 0
+// r1 saves the return address
+// r2 is the pointer to the call stack
+// r3 is the pointer to the value stack
+// r4 is the waiting-entering state switch, could serve as 
+// a volatile pointer
+// r5 is a volatile pointer
+// r6, r7 are temps
+
 .zero r0
 .temps r6, r7
 
-//initializing jumptable
+
+// --------- initializing jumptable ---------------- */
 .section rodata
 jumptable:
         .space 256
 
 .section init
 init_jumptable:
+        
         r4 := 0
+        push r3 on stack r2     //save value stack pointer
 
-init_table_and_commands:
-        r3 := jumptable + r4
+        //set registers to jumptable bounds
+        r3 := jumptable
+        r5 := jumptable + 256
+
+init_table_with_inputerror:
+        //loop to set the jumptable with input_error
         m[r0][r3] := input_error
-        r4 := r4 + 1
-        r5 := r4 - 256
-        if (r5 != 0) goto init_table_and_commands
+        r3 := r3 + 1
+        r5 := r3 - 256
+        r5 := r5 - jumptable
+        if (r5 != 0) goto init_table_with_inputerror
+        
+        pop r3 off stack r2     //get value stack pointer
 
-//helper functions
+
+//   ----------------- helper functions ---------------- */
 .section text
 check_length2:
-        r5 := r4 / 2
-        if (r5 != 0) goto r1
-        r5 := 2
+        r5 := valstack - r3     //get value stack length
+        r5 := r5 / 2
+        if (r5 != 0) goto r1    //pass if has at least 2
+        r5 := 2                 //otherwise call stack_underflow
         goto stack_underflow
 
 check_length1:
-        if (r4 != 0) goto r1
-        r5 := 1
+        r5 := valstack - r3     //get value stack length
+        if (r5 != 0) goto r1    //pass if has at least 2
+        r5 := 1                 //otherwise call stack_underflow
         goto stack_underflow
-
-stack_underflow:
-        output "stack underflow --- expected at least"
-        output r5 + '0'
-        output " element"
-        r3 := r5 - 1
-        if (r3 == 0) goto newline
-        output 's'
-        output "\n"
-        goto waiting_state
-
-newline:
-        output '\n'
-        goto waiting_state
-
-divide_by_zero:
-        output "cannot divide by zero\n"
-        push r5 on stack r2
-        push r1 on stack r2
-        goto waiting_state
-
-
-
-//error
-.section text
-input_error:
-        output "unknown character \'"
-        output r1
-        output "\'\n"
-        goto waiting_state
 
 halt_prog:
         halt
 
 
-//space prompts to waiting state
-.section init
-        m[r0][jumptable + ' '] := waiting_state
-        // might also need include other isspace() char
+//   --------------- error message -------------------- */
+stack_underflow:
+        //outputs the error message in desired format
+        output "Stack underflow---expected at least "
+        output r5 + '0'
+        output " element"
+        r5 := r5 - 1
+        if (r5 == 0) goto skip_s
+        output 's'
+        output "\n"
 
-.section text
-waiting_state:
-        r1 := input()
-        r3 := 0
-        goto waiting_with_char
-
-waiting_with_char:
-        r5 := r1 + 1
-        if (r5 == 0) goto halt_prog
-        r5 := jumptable + r1
-        r5 := m[r0][r5]
-        goto r5
-
-enter_state:
-        r3 := 1
-        r1 := input()
-        goto waiting_with_char
+        goto waiting_state
+skip_s:
+        output '\n'
+        goto waiting_state
 
 
-//digits
+divide_by_zero:
+        //outputs the error message for division by zero
+        //keeps the value stack unchanged
+        output "Division by zero\n"
+        push r5 on stack r3
+        push r1 on stack r3
+
+        r4 := 0
+        goto waiting_state
+
+
+input_error:
+        output "Unknown character \'"
+        output r1
+        output "\'\n"
+        goto waiting_state
+
+
+
+
+// ------------------- init and implement operands  --------------- */
+// --------------------- digits ----------------------- */
 .section init
         m[r0][jumptable + '0'] := digits
         m[r0][jumptable + '1'] := digits
@@ -102,210 +109,325 @@ enter_state:
         m[r0][jumptable + '9'] := digits
 .section text
 digits:
-        r1 := r1 - '0'
-        push r1 on stack r2
-        r3 := r3 - 1
-        if (r3 != 0) goto enter_digits
-        goto waiting_state
+        //check if in waiting or entering state
+        //if in waiting state, call first digit
+        //otherwise append the digit to the current number
 
-enter_digits:
-        pop r5 off stack r2
-        r5 :=r5 * 10
-        r5 := r5 + r1
-        push r5 on stack r2
-        goto enter_digits
+        if (r4 == 0) goto first_digit
+        
+        pop r5 off stack r3     //take the current number
+        r5 := r5 * 10
+        pop r4 off stack r2     //take the digit to append
+        r4 := r4 - '0'
+        r5 := r5 + r4
+        push r5 on stack r3     //save the result to value stack
+        
+        r4 := 1                 //set to entering state
+        goto enter_state
+
+first_digit:
+        pop r5 off stack r2     //take the number to enter
+        
+        r5 := r5 - '0'
+        push r5 on stack r3     //save the number to value stack
+        r4 := 1                 //set to entering state
+        goto enter_state
 
 
-//newline in input
+
+// --------------------  newline in input print value stack ----------------
 .section init
         m[r0][jumptable + '\n'] := print_stack
 
-//print output
+// ------------------------  print stack ------------------------------
 .section text
 print_stack:
-        r3 := 0
-        output ">>>"
-        goto call_printd
-        goto waiting_state
+        push r1 on stack r2
+        r4 := r3
 
-call_printd:
-        if (r4 == 0) goto waiting_state
-        goto printd linking r1
-        r3 := r3 + 1
-        r5 := r4 - r3
-        if (r5 != 0) goto call_printd
-        goto waiting_state
+        call_printd:
+                //if reached the bottom of the value stack, return
+                if (r4 == valstack) goto return using r1
 
-//add
+                output ">>> "
+                r5 := m[r0][r4]
+                push r5 on stack r2     //save argument to call stack
+		goto printd linking r1
+                output "\n"
+                r4 := r4 + 1
+                goto call_printd        //loops through the value stack
+
+        return:
+                pop r1 off stack r2     
+                r4 := 0                 //set to waiting state
+                goto waiting_state
+
+// ------------------------ add -------------------------------
 .section init
         m[r0][jumptable + '+'] := add
 .section text
 add:
         goto check_length2 linking r1
 
-        pop r1 off stack r2
-        pop r5 off stack r2
+        // take the numbers to be added
+        pop r1 off stack r3
+        pop r5 off stack r3
 
         r1 := r5 + r1
-        push r1 on stack r2
-        r4 := r4 - 1
+
+        push r1 on stack r3     //save the result to value stack
+        r4 := 0                 
         goto waiting_state
 
-//subtract
+// ------------------------ subtract ----------------------------
 .section init
         m[r0][jumptable + '-'] := sub
 .section text
 sub:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        
+        // take the numbers to perform substraction
+        pop r1 off stack r3
+        pop r5 off stack r3
 
         r1 := r5 - r1
-        push r1 on stack r2
-        r4 := r4 - 1
+        
+        push r1 on stack r3
+        r4 := 0
         goto waiting_state
 
-//multiply
+// ------------------------ multiply -----------------------------
 .section init
         m[r0][jumptable + '*'] := mul
 .section text
 mul:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+
+        // take the numbers to perform multiplication
+        pop r1 off stack r3
+        pop r5 off stack r3
 
         r1 := r5 * r1
-        push r1 on stack r2
-        r4 := r4 - 1
+
+        push r1 on stack r3
+        r4 := 0
         goto waiting_state
 
-//divide
+// ------------------------ divide -----------------------------
 .section init
         m[r0][jumptable + '/'] := div
 .section text
 div:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        pop r1 off stack r3
+        pop r5 off stack r3
 
-        if (r1 == 0) goto divide_by_zero
-       
-        r1 := r5 / r1
-        push r1 on stack r2
-        r4 := r4 - 1
-        goto waiting_state
+        if (r1 == 0) goto divide_by_zero        //call divide_by_zero error
         
-//bitwise or
+        // x / y
+        // check if x is positive/negative, call the responsible function
+        if (r5 >s 0) goto x_pos using r4
+        goto x_neg
+
+x_pos:
+        // x is positive
+        if (r1 >s 0) goto pos using r4          //both x and y are pos
+        goto y_neg                              //y is negative
+
+x_neg:
+        // x is neg
+        if (r1 >s 0) goto y_pos using r4        //but y is pos
+        goto neg                                //both x and y are neg
+
+pos:
+        //when both are positive, just perform normal division
+        r1 := r5 / r1
+        goto division_end
+
+y_pos:
+        //when only y is positive, negate x first, and 
+        //negate the result back, so we could print the 
+        //result in the correct format
+        r5 := -r5
+        r1 := r5 / r1
+        r1 := -r1
+        goto division_end
+
+y_neg:
+        //when only y is negative, negate y first and 
+        //negate the result back, so we could print the 
+        //result in the correct format
+        r1 := -r1
+        r1 := r5 / r1
+        r1 := -r1
+        goto division_end
+
+neg:
+        //when both x and y are negative, negate both first
+        //and then we can just perform the normal division
+        //and get the correct result
+        r1 := -r1
+        r5 := -r5
+        r1 := r5 / r1
+        goto division_end
+
+division_end:
+        push r1 on stack r3     //save the result to the value stack
+        r4 := 0                 //set to waiting
+        goto waiting_state
+
+
+
+        
+// ------------------------ bitwise or -----------------------------
 .section init
         m[r0][jumptable + '|'] := or
 .section text
 or:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        pop r1 off stack r3
+        pop r5 off stack r3
 
         r1 := r5 | r1
-        push r1 on stack r2
-        r4 := r4 - 1
+
+        push r1 on stack r3
+        r4 := 0
         goto waiting_state
 
-//bitwise and
+// ------------------------ bitwise and -----------------------------
 .section init
         m[r0][jumptable + '&'] := and
 .section text
 and:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        pop r1 off stack r3
+        pop r5 off stack r3
 
         r1 := r5 & r1
-        push r1 on stack r2
-        r4 := r4 - 1
+
+        push r1 on stack r3
+        r4 := 0
         goto waiting_state
 
-//change sign
+// ------------------------ change sign -----------------------------
 .section init
         m[r0][jumptable + 'c'] := com
 .section text
 com:
         goto check_length1 linking r1
-        pop r1 off stack r2
+        pop r1 off stack r3
 
         r1 := -r1
-        push r1 on stack r2
-        r4 := r4 - 1
+
+        push r1 on stack r3
+        r4 := 0
         goto waiting_state
 
-//flip
+// ------------------------ flip -----------------------------
 .section init
         m[r0][jumptable + '~'] := flip
 .section text
 flip:
         goto check_length1 linking r1
-        pop r1 off stack r2
+        pop r1 off stack r3
 
         r1 := ~r1
-        push r1 on stack r2
 
+        push r1 on stack r3
+
+        r4 := 0
         goto waiting_state
 
 
-//swap
+// ------------------------ swap -----------------------------
 .section init
         m[r0][jumptable + 's'] := swap
 .section text
 swap:
         goto check_length2 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        pop r1 off stack r3
+        pop r5 off stack r3
 
-        push r1 on stack r2
-        push r5 on stack r2
+        //just push them back in reverse order
+        //and thus they have been swapped
+
+        push r1 on stack r3
+        push r5 on stack r3
         
+        r4 := 0
         goto waiting_state
 
 
-//duplicate
+// ------------------------ duplicate -----------------------------
 .section init
         m[r0][jumptable + 'd'] := dup
 .section text
 dup:
         goto check_length1 linking r1
-        pop r1 off stack r2
-        pop r5 off stack r2
+        pop r1 off stack r3
 
-        r5 := r1
-        push r1 on stack r2
-        push r5 on stack r2
+        //just push back twice
+        push r1 on stack r3
+        push r1 on stack r3
 
+        r4 := 0
         goto waiting_state
 
 
-//delete
+// ------------------------ delete -----------------------------
 .section init
         m[r0][jumptable + 'p'] := del
 .section text
 del:
         goto check_length1 linking r1
-        pop r1 off stack r2
+        pop r1 off stack r3
 
-        r4 := r4 - 1
+        r4 := 0
         goto waiting_state
 
 
-//zero
+// ------------------------ clear -----------------------------
 .section init
-        m[r0][jumptable + 'z'] := zero
+        m[r0][jumptable + 'z'] := clear
 .section text
-zero:
-        if (r4 == 0) goto waiting_state
-        pop r1 off stack r2
-        r4 := r4 - 1
-        goto zero
+clear:
+        r4 := r3        //gets a copy to the value stack pointer
+
+        //loop through the value stack to pop everything off
+        //clearing the value stack
+        if (r4 == valstack) goto waiting_state using r5
+        pop r1 off stack r3
+        r4 := r4 + 1
+        goto clear
 
 
 
-//main
+// ------------------------ main -----------------------------
 .section text
 main:        
+        r4 := 0
         goto waiting_state
+
+
+// -----------------space and waiting and enter states ---------------- */
+.section init
+        m[r0][jumptable + ' '] := waiting_state
+
+.section text
+waiting_state:
+        r4 := 0
+        r1 := input()
+        goto waiting_with_char
+
+waiting_with_char:
+        r5 := r1 + 1
+        if (r5 == 0) goto halt_prog
+        r5 := r5 - 1
+        push r5 on stack r2
+        r5 := jumptable + r1             //find the label in the jumptable
+        r5 := m[r0][r5]                  //and call the correct function
+        goto r5         
+
+enter_state:
+        r1 := input()
+        goto waiting_with_char

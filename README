@@ -1,0 +1,22 @@
+README
+
+This is the README for RPN Calculator assignment
+submitted by Mingzhe Li (mli04) and Shivani Sinha (ssinha02)
+
+We recevied generous help from Thomas Colgroves, Raewyn, Alex Tong, 
+Carter Casey, Jacob
+
+What has been correctly implemented? Everything to our knowledge.
+
+What has not been correctly implemented? Nothing to our knowledge.
+
+Departure from the recommended calling convention:
+        We made r3 as our value stack pointer.
+        We made r4 as our enter-write state switch
+
+Print Module:
+        We loop through our value stack and call printd on each number
+
+Analyzing:        7hrs
+Coding:         3hrs
+Debugging:      10hrs

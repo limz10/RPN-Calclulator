@@ -4,5 +4,10 @@
 .space 100000
 endstack:
 
+.section valstk
+.space 100000
+valstack:
+
 .section init
 r2 := endstack
+r3 := valstack
